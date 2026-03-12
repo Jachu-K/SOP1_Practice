@@ -173,6 +173,8 @@ void* thread3_work(void * arg) {
     return NULL;
 }
 
+
+
 int main(int argc,char** argv) {
     if (argc < 2) {
         printf("Program musi być wywołany z parametrem n\n");
