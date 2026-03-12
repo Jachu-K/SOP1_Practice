@@ -41,9 +41,14 @@ int parse_file(const char *filename, Character warriors[], int max_warriors) {
     char line[MAX_LINE];
     int count = 0;
 
+    /*
+    char* line = NULL;
+    size_t count = 0;
+    while (count < max_warriors && getline(&line, &count, file)) {
+    */
+
     while (count < max_warriors && fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\n")] = '\0';  // usuwamy newline
-
         int parsed = sscanf(line, "%99[^;];%d;%d",
                             warriors[count].name,
                             &warriors[count].strength,
