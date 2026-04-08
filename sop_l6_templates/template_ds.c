@@ -25,6 +25,7 @@ struct shared_sync {
     pthread_mutex_t mutex;      // robust mutex
     int counter_sem;            // licznik chroniony semaforem
     sem_t sem;                  // semafor binarny (działa jak mutex)
+    int counter_named_sem;      // licznik chroniony nazwanym semaforem
 };
 
 int main(int argc, char *argv[]) {
@@ -99,6 +100,14 @@ int main(int argc, char *argv[]) {
     // Inicjalizacja semafora binarnego (pshared = 1)
     if (sem_init(&sync->sem, 1, 1) == -1) die("sem_init");
     sync->counter_sem = 0;
+    sync->counter_named_sem = 0;
+
+    // Inicjalizacja semafora NAZWANEGO
+    char named_sem_name[64];
+    snprintf(named_sem_name, sizeof(named_sem_name), "/my_named_sem_%ld", (long)getpid());
+    if (sem_unlink(named_sem_name) == -1 && errno != ENOENT) die("sem_unlink stale named");
+    sem_t *named_sem = sem_open(named_sem_name, O_CREAT | O_EXCL, 0600, 1);
+    if (named_sem == SEM_FAILED) die("sem_open named");
 
     /* ------------------------------------------------------------
      * 5. Tworzenie procesów dzieci
@@ -166,6 +175,13 @@ int main(int argc, char *argv[]) {
             printf("Dziecko %d: zwiększyło counter_sem do %d\n", index, sync->counter_sem);
             if (sem_post(&sync->sem) == -1) die("sem_post");
 
+            // ---- e) Synchronizacja przez SEMAFOR NAZWANY ----
+            if (sem_wait(named_sem) == -1) die("sem_wait named");
+            sync->counter_named_sem++;
+            printf("Dziecko %d: zwiększyło counter_named_sem do %d\n", index, sync->counter_named_sem);
+            if (sem_post(named_sem) == -1) die("sem_post named");
+            if (sem_close(named_sem) == -1) die("sem_close child named");
+
             usleep(10000);  // małe opóźnienie dla czytelności
             exit(0);
         } else {
@@ -192,6 +208,7 @@ int main(int argc, char *argv[]) {
         printf("  [%d] = '%c'\n", i, named_shared[i]);
     printf("\nLicznik chroniony robust mutexem: counter_mutex = %d\n", sync->counter_mutex);
     printf("Licznik chroniony semaforem:    counter_sem = %d\n", sync->counter_sem);
+    printf("Licznik chroniony nazw. semaf.: counter_named_sem = %d\n", sync->counter_named_sem);
     printf("(Uwaga: część dzieci mogła umrzeć przed inkrementacją, dlatego wartości mogą być niższe niż %d)\n", num_children);
 
     // Zwalnianie pamięci i usuwanie obiektów
@@ -204,6 +221,8 @@ int main(int argc, char *argv[]) {
     int dret = pthread_mutex_destroy(&sync->mutex);
     if (dret != 0) die_pthread(dret, "pthread_mutex_destroy");
     sem_destroy(&sync->sem);
+    if (sem_close(named_sem) == -1) die("sem_close parent named");
+    if (sem_unlink(named_sem_name) == -1) die("sem_unlink named final");
     munmap(sync, sizeof(struct shared_sync));
 
     return 0;

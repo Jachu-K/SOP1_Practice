@@ -92,7 +92,8 @@ alive_count (chronione semaforem):    0
   - `PTHREAD_PROCESS_SHARED`
   - `PTHREAD_MUTEX_ROBUST`
   - obsluga `EOWNERDEAD` + `pthread_mutex_consistent()`
-- `sem_init()/sem_wait()/sem_post()` - druga metoda ochrony wspolnego licznika.
+- `sem_init()/sem_wait()/sem_post()` - nienazwany semafor wspoldzielony.
+- `sem_open()/sem_close()/sem_unlink()` - nazwany semafor POSIX.
 
 ## 6) Czeste problemy
 

@@ -17,12 +17,14 @@
 
 #define NAMED_DATA_SHM "/demo_named_data_shm_l6"
 #define CTRL_SHM "/demo_ctrl_shm_l6"
+#define NAMED_SEM_L6 "/demo_named_sem_l6"
 
 typedef struct {
     pthread_mutex_t robust_count_mutex;
     int alive_count_mutex;
     sem_t count_sem;
     int alive_count_sem;
+    int alive_count_named_sem;
 } shared_ctrl_t;
 
 static void die(const char *msg) {
@@ -63,7 +65,7 @@ static void lock_robust_or_recover(pthread_mutex_t *m) {
 }
 
 static void child_job(int idx, int children, const char *txt_path, char *unnamed_map,
-                      char *named_map, shared_ctrl_t *ctrl, off_t file_size) {
+                      char *named_map, shared_ctrl_t *ctrl, sem_t *named_sem, off_t file_size) {
     srand((unsigned int)(time(NULL) ^ (getpid() << 16)));
 
     int fd = open(txt_path, O_RDONLY);
@@ -123,6 +125,17 @@ static void child_job(int idx, int children, const char *txt_path, char *unnamed
     ctrl->alive_count_sem--;
     if (sem_post(&ctrl->count_sem) != 0) {
         die("sem_post");
+    }
+
+    if (sem_wait(named_sem) != 0) {
+        die("sem_wait named");
+    }
+    ctrl->alive_count_named_sem--;
+    if (sem_post(named_sem) != 0) {
+        die("sem_post named");
+    }
+    if (sem_close(named_sem) != 0) {
+        die("sem_close child named");
     }
 
     _exit(0);
@@ -204,6 +217,15 @@ int main(int argc, char **argv) {
         die("sem_init");
     }
     ctrl->alive_count_sem = children;
+    ctrl->alive_count_named_sem = children;
+
+    if (sem_unlink(NAMED_SEM_L6) != 0 && errno != ENOENT) {
+        die("sem_unlink stale named");
+    }
+    sem_t *named_sem = sem_open(NAMED_SEM_L6, O_CREAT | O_EXCL, 0600, 1);
+    if (named_sem == SEM_FAILED) {
+        die("sem_open named");
+    }
 
     for (int i = 0; i < children; i++) {
         pid_t pid = fork();
@@ -211,7 +233,7 @@ int main(int argc, char **argv) {
             die("fork");
         }
         if (pid == 0) {
-            child_job(i, children, txt_path, unnamed_map, named_map, ctrl, file_size);
+            child_job(i, children, txt_path, unnamed_map, named_map, ctrl, named_sem, file_size);
         }
     }
 
@@ -257,8 +279,17 @@ int main(int argc, char **argv) {
         die("sem_post final");
     }
 
+    if (sem_wait(named_sem) != 0) {
+        die("sem_wait named final");
+    }
+    int final_named_sem_count = ctrl->alive_count_named_sem;
+    if (sem_post(named_sem) != 0) {
+        die("sem_post named final");
+    }
+
     printf("alive_count (chronione robust mutex): %d\n", final_mutex_count);
     printf("alive_count (chronione semaforem):    %d\n", final_sem_count);
+    printf("alive_count (chronione nazw. sem.):   %d\n", final_named_sem_count);
 
     if (sem_destroy(&ctrl->count_sem) != 0) {
         die("sem_destroy");
@@ -277,6 +308,12 @@ int main(int argc, char **argv) {
     }
     close(named_fd);
     close(ctrl_fd);
+    if (sem_close(named_sem) != 0) {
+        die("sem_close parent named");
+    }
+    if (sem_unlink(NAMED_SEM_L6) != 0) {
+        die("sem_unlink named sem final");
+    }
     if (shm_unlink(NAMED_DATA_SHM) != 0) {
         die("shm_unlink named final");
     }

@@ -16,12 +16,14 @@
 
 #define LAB_NAMED_SHM_DATA "/lab_named_data_l6"
 #define LAB_NAMED_SHM_CTRL "/lab_named_ctrl_l6"
+#define LAB_NAMED_SEM "/lab_named_sem_l6"
 
 typedef struct {
     pthread_mutex_t robust_mutex;
     int children_left_mutex;
     sem_t semaphore;
     int children_left_semaphore;
+    int children_left_named_semaphore;
 } ctrl_block_t;
 
 static void fail(const char *msg) {
@@ -56,7 +58,8 @@ static void child_task(
     off_t txt_size,
     char *unnamed_shared,
     char *named_shared,
-    ctrl_block_t *ctrl
+    ctrl_block_t *ctrl,
+    sem_t *named_sem
 ) {
     srand((unsigned int)(time(NULL) ^ (getpid() << 8)));
 
@@ -107,6 +110,11 @@ static void child_task(
     if (sem_wait(&ctrl->semaphore) != 0) fail("sem_wait");
     ctrl->children_left_semaphore--;
     if (sem_post(&ctrl->semaphore) != 0) fail("sem_post");
+
+    if (sem_wait(named_sem) != 0) fail("sem_wait named");
+    ctrl->children_left_named_semaphore--;
+    if (sem_post(named_sem) != 0) fail("sem_post named");
+    if (sem_close(named_sem) != 0) fail("sem_close child named");
 
     _exit(0);
 }
@@ -164,12 +172,17 @@ int main(int argc, char **argv) {
     ctrl->children_left_mutex = child_count;
     if (sem_init(&ctrl->semaphore, 1, 1) != 0) fail("sem_init");
     ctrl->children_left_semaphore = child_count;
+    ctrl->children_left_named_semaphore = child_count;
+
+    if (sem_unlink(LAB_NAMED_SEM) != 0 && errno != ENOENT) fail("sem_unlink stale named");
+    sem_t *named_sem = sem_open(LAB_NAMED_SEM, O_CREAT | O_EXCL, 0600, 1);
+    if (named_sem == SEM_FAILED) fail("sem_open named");
 
     for (int i = 0; i < child_count; i++) {
         pid_t pid = fork();
         if (pid < 0) fail("fork");
         if (pid == 0) {
-            child_task(i, child_count, txt_path, txt_size, unnamed_shared, named_shared, ctrl);
+            child_task(i, child_count, txt_path, txt_size, unnamed_shared, named_shared, ctrl, named_sem);
         }
     }
 
@@ -198,8 +211,13 @@ int main(int argc, char **argv) {
     int by_semaphore = ctrl->children_left_semaphore;
     if (sem_post(&ctrl->semaphore) != 0) fail("sem_post final");
 
+    if (sem_wait(named_sem) != 0) fail("sem_wait named final");
+    int by_named_semaphore = ctrl->children_left_named_semaphore;
+    if (sem_post(named_sem) != 0) fail("sem_post named final");
+
     printf("children_left (mutex robust): %d\n", by_mutex);
     printf("children_left (semafor):      %d\n", by_semaphore);
+    printf("children_left (named sem):    %d\n", by_named_semaphore);
 
     if (sem_destroy(&ctrl->semaphore) != 0) fail("sem_destroy");
     if (pthread_mutex_destroy(&ctrl->robust_mutex) != 0) fail("pthread_mutex_destroy");
@@ -208,6 +226,8 @@ int main(int argc, char **argv) {
     if (munmap(ctrl, sizeof(*ctrl)) != 0) fail("munmap ctrl");
     close(data_fd);
     close(ctrl_fd);
+    if (sem_close(named_sem) != 0) fail("sem_close parent named");
+    if (sem_unlink(LAB_NAMED_SEM) != 0) fail("sem_unlink named final");
     if (shm_unlink(LAB_NAMED_SHM_DATA) != 0) fail("shm_unlink data final");
     if (shm_unlink(LAB_NAMED_SHM_CTRL) != 0) fail("shm_unlink ctrl final");
 
