@@ -27,6 +27,8 @@
 typedef struct {
     pthread_mutex_t robust_mutex;
     int processes_count;
+    int los;
+    int traf;
 } ctrl_block_t;
 
 static void init_robust_mutex_pshared(pthread_mutex_t *m) {
@@ -123,13 +125,13 @@ void usage(char* argv[])
 int main(int argc, char* argv[])
 {
     usage(argv);
-    if (argc < 4) {
+    /*if (argc < 4) {
         ERR("za male wejscie");
         exit(1);
-    }
-    int a = atoi(argv[1]);
-    int b = atoi(argv[2]);
-    int N = atoi(argv[3]);
+    }*/
+    int a = -1;
+    int b = 1;
+    int N = 1000;
 
     int ctrl_fd = shm_open(LAB_NAMED_SHM_CTRL, O_CREAT | O_RDWR, 0600);
     if (ctrl_fd < 0 && errno == EEXIST) {
@@ -137,7 +139,7 @@ int main(int argc, char* argv[])
         ctrl_fd = shm_open(LAB_NAMED_SHM_CTRL, O_CREAT | O_RDWR, 0600);
     }
     if (ctrl_fd < 0) ERR("shm_open ctrl");
-    if (ftruncate(ctrl_fd, (off_t)sizeof(ctrl_block_t)) != 0) ERR("ftruncate ctrl");
+    if (ftruncate(ctrl_fd, sizeof(ctrl_block_t)) != 0) ERR("ftruncate ctrl");
     ctrl_block_t *ctrl = mmap(NULL, sizeof(ctrl_block_t), PROT_READ | PROT_WRITE, MAP_SHARED, ctrl_fd, 0);
     if (ctrl == MAP_FAILED) ERR("mmap ctrl");
     sem_t *named_sem = sem_open(LAB_NAMED_SEM, O_CREAT, 0600, 1);
@@ -149,13 +151,22 @@ int main(int argc, char* argv[])
     if (ret==0 || errno != EAGAIN) {
         czyz=1;
         init_robust_mutex_pshared(&ctrl->robust_mutex);
+        ctrl->los=0;
+        ctrl->traf=0;
     }
 
     robust_lock_or_recover(&ctrl->robust_mutex);
     ctrl->processes_count++;
     printf("pracujace procesy : %d\n", ctrl->processes_count);
     pthread_mutex_unlock(&ctrl->robust_mutex);
-
+    for (int i=0;i<3;i++) {
+        int x = randomize_points(N,a,b);
+        robust_lock_or_recover(&ctrl->robust_mutex);
+        ctrl->los+=N;
+        ctrl->traf+=x;
+        printf("liczniki : %d %d\n",ctrl->traf, ctrl->los);
+        pthread_mutex_unlock(&ctrl->robust_mutex);
+    }
 
     sleep(2);
     robust_lock_or_recover(&ctrl->robust_mutex);
